@@ -21,6 +21,7 @@ from src.utils.metrics import iou_score
 
 from src.network.conv_based.CMUNet import CMUNet
 from src.network.conv_based.CMUNet_MSHFFA import CMUNet_MSHFFA
+from src.network.conv_based.CMUNet_ECA import CMUNet_ECA
 from src.network.conv_based.U_Net import U_Net
 from src.network.conv_based.AttU_Net import AttU_Net
 from src.network.conv_based.UNeXt import UNext
@@ -47,7 +48,7 @@ def seed_torch(seed):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default="Mobile_U_ViT",
-                    choices=["Mobile_U_ViT", "CMUNeXt", "CMUNet","CMUNet_MSHFFA", "AttU_Net", "TransUnet", "R2U_Net", "U_Net",
+                    choices=["Mobile_U_ViT", "CMUNeXt", "CMUNet","CMUNet_MSHFFA", "CMUNet_ECA","AttU_Net", "TransUnet", "R2U_Net", "U_Net",
                              "UNext", "UNetplus", "UNet3plus", "SwinUnet", "MedT", "TransUnet"], help='model')
 parser.add_argument('--base_dir', type=str, default="./data/busi", help='dir')
 parser.add_argument('--train_file_dir', type=str, default="busi_train.txt", help='dir')
@@ -69,6 +70,8 @@ def get_model(args):
         model = CMUNet(output_ch=args.num_classes).cuda()
     elif args.model == "CMUNet_MSHFFA":  # <-- 新增分支
         model = CMUNet_MSHFFA(output_ch=args.num_classes).cuda()
+    elif args.model == "CMUNet_ECA":  # <--- 在这里添加新分支
+        model = CMUNet_ECA(output_ch=args.num_classes).cuda()
     elif args.model == "CMUNeXt":
         model = cmunext(num_classes=args.num_classes).cuda()
     elif args.model == "U_Net":
