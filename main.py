@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader
 from src.dataloader.dataset import MedicalDataSets
 from albumentations.augmentations import transforms
 from albumentations.core.composition import Compose
-from albumentations import RandomRotate90, Resize
+from albumentations import RandomRotate90, Resize, ElasticTransform, GridDistortion, RandomBrightnessContrast, GaussNoise, OneOf
+
 import src.utils.losses as losses
 from src.utils.util import AverageMeter
 from src.utils.metrics import iou_score
@@ -103,6 +104,21 @@ def getDataloader(args):
         RandomRotate90(),
         transforms.Flip(),
         Resize(img_size, img_size),
+
+        # --- 修改在这里 ---
+        # 1. 把所有“形状”增强放进一个 OneOf
+        OneOf([
+            ElasticTransform(p=1, alpha=120, sigma=120 * 0.05),  # p=1 因为 OneOf 已经控制了总概率
+            GridDistortion(p=1),
+        ], p=0.5),  # 50% 的概率从上面选一个做
+
+        # 2. 把所有“像素”增强放进一个 OneOf
+        OneOf([
+            RandomBrightnessContrast(p=1, brightness_limit=0.2, contrast_limit=0.2),
+            GaussNoise(p=1),
+        ], p=0.5),  # 50% 的概率从上面选一个做
+        # --- 修改结束 ---
+
         transforms.Normalize(),
     ])
 
@@ -304,4 +320,4 @@ if __name__ == "__main__":
 
 #  cd ~/autodl-tmp/cmu-net
 
-# python main.py --model CMUNet --base_dir ./data/busi --train_file_dir busi_train3.txt --val_file_dir busi_val3.txt --save_dir ./checkpoint/busi-3-1 --base_lr 0.005 --epoch 300 --batch_size 8
+# python main.py --model CMUNet --base_dir ./data/busi --train_file_dir busi_train2.txt --val_file_dir busi_val2.txt --save_dir ./checkpoint/busi-cmunet-2-d --base_lr 0.01 --epoch 300 --batch_size 8
