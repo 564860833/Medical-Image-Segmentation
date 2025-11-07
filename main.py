@@ -108,15 +108,15 @@ def getDataloader(args):
         # --- 修改在这里 ---
         # 1. 把所有“形状”增强放进一个 OneOf
         OneOf([
-            ElasticTransform(p=1, alpha=120, sigma=120 * 0.05),  # p=1 因为 OneOf 已经控制了总概率
+            ElasticTransform(p=1, alpha=40, sigma=4),  # p=1 因为 OneOf 已经控制了总概率
             GridDistortion(p=1),
-        ], p=0.5),  # 50% 的概率从上面选一个做
+        ], p=0.5),
 
         # 2. 把所有“像素”增强放进一个 OneOf
         OneOf([
-            RandomBrightnessContrast(p=1, brightness_limit=0.2, contrast_limit=0.2),
-            GaussNoise(p=1),
-        ], p=0.5),  # 50% 的概率从上面选一个做
+            RandomBrightnessContrast(p=1, brightness_limit=0.15, contrast_limit=0.15),
+            GaussNoise(p=1, var_limit=(0.64, 6.5)),
+        ], p=0.35),
         # --- 修改结束 ---
 
         transforms.Normalize(),
@@ -320,4 +320,4 @@ if __name__ == "__main__":
 
 #  cd ~/autodl-tmp/cmu-net
 
-# python main.py --model CMUNet --base_dir ./data/busi --train_file_dir busi_train2.txt --val_file_dir busi_val2.txt --save_dir ./checkpoint/busi-cmunet-2-d --base_lr 0.01 --epoch 300 --batch_size 8
+# python main.py --model CMUNet_MSHFFA --base_dir ./data/busi --train_file_dir busi_train2.txt --val_file_dir busi_val2.txt --save_dir ./checkpoint/busi-cmunet-mshffa-2 --base_lr 0.01 --epoch 300 --batch_size 8
