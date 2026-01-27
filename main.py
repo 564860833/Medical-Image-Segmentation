@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader
 from src.dataloader.dataset import MedicalDataSets
 from albumentations.augmentations import transforms
 from albumentations.core.composition import Compose
-from albumentations import RandomRotate90, Resize, ElasticTransform, GridDistortion, RandomBrightnessContrast, GaussNoise, OneOf
+from albumentations import RandomRotate90, Resize, ElasticTransform, GridDistortion, RandomBrightnessContrast, \
+    GaussNoise, OneOf
 
 import src.utils.losses as losses
 from src.utils.util import AverageMeter
@@ -30,6 +31,9 @@ from src.network.conv_based.UNeXt import UNext
 from src.network.conv_based.UNetplus import ResNet34UnetPlus
 from src.network.conv_based.UNet3plus import UNet3plus
 from src.network.conv_based.CMUNeXt import cmunext
+from src.network.conv_based.CMUNeXt_ASPP import CMUNeXt_ASPP
+from src.network.conv_based.CMUNeXt_FFT import CMUNeXt_FFT
+
 
 from src.network.transfomer_based.transformer_based_network import get_transformer_based_model
 
@@ -50,7 +54,8 @@ def seed_torch(seed):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default="Mobile_U_ViT",
-                    choices=["Mobile_U_ViT", "CMUNeXt", "CMUNet","CMUNet_MSHFFA", "CMUNet_ECA","CMUNet_Hybrid","AttU_Net", "TransUnet", "R2U_Net", "U_Net",
+                    choices=["Mobile_U_ViT", "CMUNeXt","CMUNeXt_ASPP", "CMUNeXt_FFT", "CMUNet", "CMUNet_MSHFFA", "CMUNet_ECA",
+                             "CMUNet_Hybrid", "AttU_Net", "TransUnet", "R2U_Net", "U_Net",
                              "UNext", "UNetplus", "UNet3plus", "SwinUnet", "MedT", "TransUnet"], help='model')
 parser.add_argument('--base_dir', type=str, default="./data/busi", help='dir')
 parser.add_argument('--train_file_dir', type=str, default="busi_train.txt", help='dir')
@@ -78,6 +83,10 @@ def get_model(args):
         model = CMUNet_Hybrid(output_ch=args.num_classes).cuda()
     elif args.model == "CMUNeXt":
         model = cmunext(num_classes=args.num_classes).cuda()
+    elif args.model == "CMUNeXt_ASPP":
+        model = CMUNeXt_ASPP(num_classes=args.num_classes).cuda()
+    elif args.model == "CMUNeXt_FFT":
+        model = CMUNeXt_FFT(num_classes=args.num_classes).cuda()
     elif args.model == "U_Net":
         model = U_Net(output_ch=args.num_classes).cuda()
     elif args.model == "AttU_Net":
@@ -100,27 +109,15 @@ def getDataloader(args):
     img_size = args.img_size
     if args.model == "SwinUnet":
         img_size = 224
+
+    # --- 修改：恢复为基础数据增强 ---
     train_transform = Compose([
         RandomRotate90(),
         transforms.Flip(),
         Resize(img_size, img_size),
-
-        # --- 修改在这里 ---
-        # 1. 把所有“形状”增强放进一个 OneOf
-        OneOf([
-            ElasticTransform(p=1, alpha=40, sigma=4),  # p=1 因为 OneOf 已经控制了总概率
-            GridDistortion(p=1),
-        ], p=0.5),
-
-        # 2. 把所有“像素”增强放进一个 OneOf
-        OneOf([
-            RandomBrightnessContrast(p=1, brightness_limit=0.15, contrast_limit=0.15),
-            GaussNoise(p=1, var_limit=(0.64, 6.5)),
-        ], p=0.35),
-        # --- 修改结束 ---
-
         transforms.Normalize(),
     ])
+    # --- 修改结束 ---
 
     val_transform = Compose([
         Resize(img_size, img_size),
@@ -315,9 +312,10 @@ def main(args):
 if __name__ == "__main__":
     main(args)
 
-
 # python main.py --model CMUNet --base_dir ./data/isic2018 --train_file_dir isic2018_train.txt --val_file_dir isic2018_val.txt --base_lr 0.01 --epoch 300 --batch_size 8
 
 #  cd ~/autodl-tmp/cmu-net
 
-# python main.py --model CMUNet_MSHFFA --base_dir ./data/busi --train_file_dir busi_train2.txt --val_file_dir busi_val2.txt --save_dir ./checkpoint/busi-cmunet-mshffa-2 --base_lr 0.01 --epoch 300 --batch_size 8
+# python main.py --model CMUNet --base_dir ./data/busi --train_file_dir busi_train3.txt --val_file_dir busi_val3.txt --save_dir ./checkpoint/busi-cmunet-3-a --base_lr 0.01 --epoch 400 --batch_size 8
+
+# python main.py --model CMUNeXt --base_dir ./data/busi --train_file_dir busi_train3.txt --val_file_dir busi_val3.txt --save_dir ./checkpoint/busi-CMUNeXt-3-b --base_lr 0.01 --epoch 400 --batch_size 8
