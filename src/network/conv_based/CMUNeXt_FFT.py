@@ -14,6 +14,7 @@ class Residual(nn.Module):
     def forward(self, x):
         return self.fn(x) + x
 
+
 class conv_block(nn.Module):
     def __init__(self, ch_in, ch_out):
         super(conv_block, self).__init__()
@@ -25,6 +26,7 @@ class conv_block(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
 
 class up_conv(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -38,6 +40,7 @@ class up_conv(nn.Module):
 
     def forward(self, x):
         return self.up(x)
+
 
 class fusion_conv(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -56,6 +59,7 @@ class fusion_conv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
 
 class CMUNeXtBlock(nn.Module):
     def __init__(self, ch_in, ch_out, depth=1, k=3):
@@ -82,6 +86,7 @@ class CMUNeXtBlock(nn.Module):
         x = self.up(x)
         return x
 
+
 # --------------------------
 # 核心创新模块: 频域去噪 (FFT)
 # --------------------------
@@ -89,6 +94,10 @@ class CMUNeXtBlock(nn.Module):
 class FFTLowPassDenoise2D(nn.Module):
     """
     Differentiable FFT low-pass filtering for feature maps.
+
+    注意：
+    - 为 AMP/fp16/bf16 兼容，mask dtype 会对齐到 FFT 输出的 real dtype（通常是 float32）
+    - cutoff_ratio 是相对于频域最大径向距离 r_max 的比例（r_max 采用对角线半径）
     """
     def __init__(self, cutoff_ratio: float = 0.35):
         super().__init__()
@@ -98,26 +107,48 @@ class FFTLowPassDenoise2D(nn.Module):
 
     @staticmethod
     def _lowpass_mask(h: int, w: int, cutoff_ratio: float, device, dtype):
+        # centered coordinates: [-h/2, h/2), [-w/2, w/2)
         yy = torch.arange(h, device=device, dtype=dtype) - (h / 2.0)
         xx = torch.arange(w, device=device, dtype=dtype) - (w / 2.0)
         yy = yy.view(h, 1)
         xx = xx.view(1, w)
-        rr = torch.sqrt(yy * yy + xx * xx)
-        r_max = torch.sqrt(torch.tensor((h / 2.0) ** 2 + (w / 2.0) ** 2, device=device, dtype=dtype))
+
+        rr = torch.sqrt(yy * yy + xx * xx)  # [H, W]
+
+        # r_max: diagonal radius
+        r_max_sq = (h / 2.0) ** 2 + (w / 2.0) ** 2
+        r_max = torch.sqrt(torch.as_tensor(r_max_sq, device=device, dtype=dtype))
+
         r_cut = cutoff_ratio * r_max
         mask = (rr <= r_cut).to(dtype=dtype)
-        return mask
+        return mask  # [H, W]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, c, h, w = x.shape
+
+        # FFT (complex)
         X = torch.fft.fft2(x, dim=(-2, -1))
         X = torch.fft.fftshift(X, dim=(-2, -1))
-        mask = self._lowpass_mask(h, w, self.cutoff_ratio, device=x.device, dtype=torch.float32)
+
+        # AMP/dtype-safe: align mask dtype to FFT output dtype
+        mask_dtype = X.real.dtype
+        mask = self._lowpass_mask(h, w, self.cutoff_ratio, device=x.device, dtype=mask_dtype)
         mask = mask.view(1, 1, h, w)
+
+        # Apply low-pass mask (broadcast over B,C)
         X_filtered = X * mask
+
+        # iFFT back
         X_filtered = torch.fft.ifftshift(X_filtered, dim=(-2, -1))
         x_rec = torch.fft.ifft2(X_filtered, dim=(-2, -1)).real
+
+        # Ensure output dtype matches input dtype (optional but often helpful)
+        # Note: if FFT internally upcasts, this will cast back for consistency.
+        if x_rec.dtype != x.dtype:
+            x_rec = x_rec.to(dtype=x.dtype)
+
         return x_rec
+
 
 # --------------------------
 # 主网络: CMUNeXt_FFT
@@ -132,7 +163,14 @@ class CMUNeXt_FFT(nn.Module):
         depths=[1, 1, 1, 3, 1],
         kernels=[3, 3, 7, 7, 7],
         fft_cutoff_ratio=0.35,
-        fft_apply_stages=(2, 3, 4),
+        # 默认最稳：只对 Stage3 做 FFT 去噪（256输入下更保边缘、更不容易过平滑）
+        fft_apply_stages=(3,),
+
+        #第二个消融：中等去噪
+    #   fft_apply_stages=(3, 4)
+
+        #第三个消融：强去噪
+    #    fft_apply_stages=(2, 3, 4)
     ):
         super(CMUNeXt_FFT, self).__init__()
 
@@ -180,7 +218,7 @@ class CMUNeXt_FFT(nn.Module):
         x2 = self.encoder2(x2)
         x2 = self._maybe_fft(x2, 2)
 
-        # Stage 3
+        # Stage 3 (默认在此做 FFT 去噪)
         x3 = self.Maxpool(x2)
         x3 = self.encoder3(x3)
         x3 = self._maybe_fft(x3, 3)
@@ -190,7 +228,7 @@ class CMUNeXt_FFT(nn.Module):
         x4 = self.encoder4(x4)
         x4 = self._maybe_fft(x4, 4)
 
-        # Stage 5 (bottleneck) - No FFT here usually, and NO ASPP
+        # Stage 5 (bottleneck) - usually no FFT here
         x5 = self.Maxpool(x4)
         x5 = self.encoder5(x5)
 
