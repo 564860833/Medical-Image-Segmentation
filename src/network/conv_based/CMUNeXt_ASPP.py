@@ -14,6 +14,7 @@ class Residual(nn.Module):
     def forward(self, x):
         return self.fn(x) + x
 
+
 class conv_block(nn.Module):
     def __init__(self, ch_in, ch_out):
         super(conv_block, self).__init__()
@@ -25,6 +26,7 @@ class conv_block(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
 
 class up_conv(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -38,6 +40,7 @@ class up_conv(nn.Module):
 
     def forward(self, x):
         return self.up(x)
+
 
 class fusion_conv(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -56,6 +59,7 @@ class fusion_conv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
 
 class CMUNeXtBlock(nn.Module):
     def __init__(self, ch_in, ch_out, depth=1, k=3):
@@ -82,6 +86,7 @@ class CMUNeXtBlock(nn.Module):
         x = self.up(x)
         return x
 
+
 # --------------------------
 # 核心创新模块: ASPP
 # --------------------------
@@ -89,8 +94,9 @@ class CMUNeXtBlock(nn.Module):
 class ASPP(nn.Module):
     """
     Classic ASPP (DeepLab-style) adapted for 2D feature maps.
+    对 256 输入更建议 dilations=(1,2,3,4)，因为瓶颈特征图大概 16x16，过大的 dilation(12/18) 可能不稳定。
     """
-    def __init__(self, in_ch: int, out_ch: int, dilations=(1, 6, 12, 18), dropout: float = 0.1):
+    def __init__(self, in_ch: int, out_ch: int, dilations=(1, 2, 3, 4), dropout: float = 0.1):
         super().__init__()
         self.branches = nn.ModuleList()
 
@@ -101,10 +107,8 @@ class ASPP(nn.Module):
             nn.ReLU(inplace=True),
         ))
 
-        # atrous conv branches
+        # atrous conv branches (包含 d=1 的 3x3 分支，不再跳过)
         for d in dilations:
-            if d == 1:
-                continue
             self.branches.append(nn.Sequential(
                 nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=d, dilation=d, bias=False),
                 nn.BatchNorm2d(out_ch),
@@ -125,7 +129,7 @@ class ASPP(nn.Module):
             nn.Conv2d(out_ch * n_branches, out_ch, kernel_size=1, bias=False),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
-            nn.Dropout(p=dropout),
+            nn.Dropout2d(p=dropout),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -133,13 +137,14 @@ class ASPP(nn.Module):
 
         feats = [branch(x) for branch in self.branches]
 
-        gp = self.global_pool(x)               # [B, out, 1, 1]
+        gp = self.global_pool(x)  # [B, out, 1, 1]
         gp = F.interpolate(gp, size=(h, w), mode="bilinear", align_corners=False)
         feats.append(gp)
 
         x = torch.cat(feats, dim=1)
         x = self.project(x)
         return x
+
 
 # --------------------------
 # 主网络: CMUNeXt_ASPP
@@ -153,7 +158,8 @@ class CMUNeXt_ASPP(nn.Module):
         dims=[16, 32, 128, 160, 256],
         depths=[1, 1, 1, 3, 1],
         kernels=[3, 3, 7, 7, 7],
-        aspp_dilations=(1, 6, 12, 18),
+        # 针对 256 输入：默认换成更合适的 dilation
+        aspp_dilations=(1, 2, 3, 4),
         aspp_dropout=0.1,
     ):
         super(CMUNeXt_ASPP, self).__init__()
@@ -168,7 +174,6 @@ class CMUNeXt_ASPP(nn.Module):
         self.encoder5 = CMUNeXtBlock(ch_in=dims[3], ch_out=dims[4], depth=depths[4], k=kernels[4])
 
         # ASPP at bottleneck
-        # 强制使用 ASPP
         self.aspp = ASPP(in_ch=dims[4], out_ch=dims[4], dilations=aspp_dilations, dropout=aspp_dropout)
 
         # Decoder
@@ -207,7 +212,7 @@ class CMUNeXt_ASPP(nn.Module):
         x5 = self.Maxpool(x4)
         x5 = self.encoder5(x5)
 
-        # ASPP enhancement (Only change from original)
+        # ASPP enhancement
         x5 = self.aspp(x5)
 
         # Decoder
